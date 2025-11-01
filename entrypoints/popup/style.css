@@ -1,0 +1,70 @@
+/* Popup-specific styles */
+@layer base {
+  body {
+    width: 600px;
+    height: 500px;
+    overflow: hidden;
+  }
+
+  #root {
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+  }
+}
+
+@layer utilities {
+  .rpg-paper-card {
+    background: hsl(var(--card));
+    border: 1px solid hsl(38 92% 50% / 0.2);
+    position: relative;
+  }
+
+  .rpg-paper-card:hover {
+    border-color: hsl(38 92% 50% / 0.3);
+  }
+
+  .rpg-stone {
+    background: hsl(var(--muted));
+    border-color: hsl(var(--border));
+  }
+
+  .rpg-alert {
+    background: hsl(0 72% 51% / 0.1);
+    border: 1px solid hsl(0 72% 51% / 0.3);
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--muted));
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--accent));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(38 92% 60%);
+}
+
+/* Smooth transitions */
+* {
+  transition-property: background-color, border-color, color, fill, stroke, opacity, box-shadow, transform;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* Override transitions for specific elements */
+button {
+  transition-duration: 200ms;
+}
+
+button:active {
+  transform: scale(0.98);
+}

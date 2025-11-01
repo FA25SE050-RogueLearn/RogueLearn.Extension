@@ -1,0 +1,122 @@
+/* Import RPG Theme */
+@import url('../../.superdesign/design_iterations/roguelearn_theme.css');
+
+@layer base {
+  :root {
+    /* Dashboard-specific variables */
+    --dashboard-max-width: 1400px;
+    --dashboard-padding: 2rem;
+
+    /* Additional color variables */
+    --primary: 330 65% 48%;
+    --primary-foreground: 0 0% 98%;
+    --ring: 45 90% 58%;
+    --popover: 24 10% 10%;
+    --popover-foreground: 0 0% 98%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --input: 24 6% 20%;
+  }
+
+  body {
+    background-color: hsl(var(--background)) !important;
+    color: hsl(var(--foreground)) !important;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+}
+
+@layer utilities {
+  .dashboard-container {
+    max-width: var(--dashboard-max-width);
+    margin: 0 auto;
+    padding: var(--dashboard-padding);
+  }
+
+  .dashboard-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: hsl(var(--background) / 0.95);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid hsl(var(--border));
+    padding: 1rem 0;
+    margin-bottom: 1.5rem;
+  }
+
+  .hero-section {
+    background: hsl(var(--card));
+    border: 2px solid hsl(var(--accent) / 0.3);
+    box-shadow: 0 0 15px hsl(var(--accent) / 0.2);
+  }
+
+  .stat-card {
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--accent) / 0.2);
+    transition: all var(--duration-normal) var(--ease-out);
+  }
+
+  .stat-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 0 20px hsl(45 90% 58% / 0.4);
+    border-color: hsl(var(--accent) / 0.5);
+  }
+
+  .chart-bar {
+    transition: all 0.2s ease;
+  }
+
+  .chart-bar:hover {
+    transform: scaleY(1.05);
+    filter: brightness(1.2);
+  }
+
+  .table-row {
+    transition: all var(--duration-fast) var(--ease-out);
+  }
+
+  .table-row:hover {
+    background-color: hsl(var(--accent) / 0.05);
+    transform: translateX(4px);
+  }
+
+  /* Animation classes for GSAP */
+  .gsap-fade-in {
+    opacity: 0;
+  }
+
+  .gsap-slide-up {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  .gsap-scale {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+
+/* Responsive adjustments */
+@media (max-width: 1024px) {
+  .dashboard-container {
+    padding: 1rem;
+  }
+
+  .stat-card {
+    font-size: 0.9rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .dashboard-container {
+    --dashboard-padding: 1rem;
+  }
+
+  .stat-card {
+    font-size: 0.85rem;
+  }
+}
