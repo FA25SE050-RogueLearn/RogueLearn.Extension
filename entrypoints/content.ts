@@ -67,6 +67,16 @@ export default defineContentScript({
         return true;
       }
 
+      if (message.action === 'cancelScraping') {
+        // Cancel the scraping operation
+        const cancelledKey = 'scheduleScrapingCancelled';
+        sessionStorage.setItem(cancelledKey, 'true');
+        sessionStorage.removeItem('scheduleScrapingProgress');
+        console.log('Scraping cancelled by user');
+        sendResponse({ success: true, cancelled: true });
+        return true;
+      }
+
       return false;
     });
   },

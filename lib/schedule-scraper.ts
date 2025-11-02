@@ -144,6 +144,15 @@ function parseScheduleTable(doc: Document): ClassSession[] {
  * Scrapes schedule data for current week and next 10 weeks
  */
 /**
+ * Cancels the current scraping operation
+ */
+export function cancelScraping(): void {
+  const storageKey = 'scheduleScrapingProgress';
+  sessionStorage.removeItem(storageKey);
+  console.log('Scraping cancelled by user');
+}
+
+/**
  * Scrapes schedule data for the current week and next 5 weeks
  * by actually changing the dropdown and waiting for page reloads
  */
@@ -153,6 +162,18 @@ export async function scrapeSchedule(): Promise<ScraperResult<ScheduleData>> {
       return {
         success: false,
         error: 'Not on schedule page. Please navigate to the Schedule page first.'
+      };
+    }
+
+    // Check if user cancelled scraping
+    const storageKey = 'scheduleScrapingProgress';
+    const cancelledKey = 'scheduleScrapingCancelled';
+    if (sessionStorage.getItem(cancelledKey) === 'true') {
+      sessionStorage.removeItem(cancelledKey);
+      sessionStorage.removeItem(storageKey);
+      return {
+        success: false,
+        error: 'Scraping cancelled by user'
       };
     }
 
@@ -178,7 +199,6 @@ export async function scrapeSchedule(): Promise<ScraperResult<ScheduleData>> {
     console.log('Max week in current year:', maxWeekInYear);
 
     // Check if we've already stored progress in sessionStorage
-    const storageKey = 'scheduleScrapingProgress';
     const progressData = sessionStorage.getItem(storageKey);
     
     let allSessions: ClassSession[] = [];
@@ -230,39 +250,62 @@ export async function scrapeSchedule(): Promise<ScraperResult<ScheduleData>> {
     
     if (remainingWeeks.length > 0) {
       // More weeks to scrape - save progress and navigate to next week
-      const nextWeek = remainingWeeks[0];
+      let nextWeek = remainingWeeks[0];
+      let targetYear = scrapingYear;
       
       // Check if we need to transition to next year
       const needsYearTransition = nextWeek > maxWeekInYear;
+      
+      if (needsYearTransition) {
+        // We're at the last week of the year, need to go to next year
+        targetYear = scrapingYear + 1;
+        
+        // Adjust nextWeek to be week 1 of next year (or the appropriate week)
+        // If we're scraping weeks 50, 51, 52, 53, 54, 55 and max is 52,
+        // then weeks 53, 54, 55 should become weeks 1, 2, 3 of next year
+        const weeksOverflow = nextWeek - maxWeekInYear;
+        nextWeek = weeksOverflow;
+        
+        console.log(`Week ${remainingWeeks[0]} exceeds max week ${maxWeekInYear}, transitioning to week ${nextWeek} of year ${targetYear}`);
+      }
       
       sessionStorage.setItem(storageKey, JSON.stringify({
         sessions: allSessions,
         weeksToScrape: weeksToScrape,
         startWeek: startWeek,
-        scrapingYear: needsYearTransition ? scrapingYear + 1 : scrapingYear
+        scrapingYear: targetYear,
+        originalWeek: remainingWeeks[0] // Store original week number for progress tracking
       }));
       
       if (needsYearTransition && yearDropdown) {
-        console.log('Transitioning to next year:', scrapingYear + 1);
+        console.log('Transitioning to next year:', targetYear);
         
-        // Change year first
-        yearDropdown.value = (scrapingYear + 1).toString();
+        // First, check if we need to change the year dropdown
+        const currentYearValue = parseInt(yearDropdown.value);
         
-        // Trigger year change postback
-        const doPostBack = (window as any).__doPostBack;
-        if (doPostBack) {
-          doPostBack(yearDropdown.name.replace('ctl00$mainContent$', '').replace('ctl00_mainContent_', ''), '');
+        if (currentYearValue !== targetYear) {
+          // Change year first
+          yearDropdown.value = targetYear.toString();
+          
+          // Trigger year change postback
+          const doPostBack = (window as any).__doPostBack;
+          if (doPostBack) {
+            doPostBack(yearDropdown.name.replace('ctl00$mainContent$', '').replace('ctl00_mainContent_', ''), '');
+          } else {
+            yearDropdown.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          
+          return {
+            success: false,
+            error: `Transitioning to year ${targetYear}...`
+          };
         } else {
-          yearDropdown.dispatchEvent(new Event('change', { bubbles: true }));
+          // Year is already correct, just change week
+          console.log('Year already set to', targetYear, 'changing to week', nextWeek);
         }
-        
-        return {
-          success: false,
-          error: `Transitioning to year ${scrapingYear + 1}...`
-        };
       }
       
-      console.log('Changing dropdown to week', nextWeek, `(${weeksToScrape.indexOf(nextWeek) + 1}/${weeksToScrape.length})`);
+      console.log('Changing dropdown to week', nextWeek, `(${weeksToScrape.indexOf(remainingWeeks[0]) + 1}/${weeksToScrape.length})`);
       
       // Change the dropdown value
       weekDropdown.value = nextWeek.toString();
@@ -277,12 +320,12 @@ export async function scrapeSchedule(): Promise<ScraperResult<ScheduleData>> {
         weekDropdown.dispatchEvent(new Event('change', { bubbles: true }));
       }
       
-      const currentProgress = weeksToScrape.indexOf(nextWeek) + 1;
+      const currentProgress = weeksToScrape.indexOf(remainingWeeks[0]) + 1;
       
       // Return a pending status
       return {
         success: false,
-        error: `Scraping in progress... Loading week ${nextWeek} (${currentProgress}/${weeksToScrape.length})`
+        error: `Scraping in progress... Loading week ${remainingWeeks[0]} (${currentProgress}/${weeksToScrape.length})`
       };
     } else {
       // All weeks scraped - clear progress and return results

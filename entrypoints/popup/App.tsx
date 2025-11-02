@@ -82,6 +82,27 @@ function App() {
     browser.runtime.sendMessage({ action: 'redirectToFAP' });
   };
 
+  const cancelScraping = async () => {
+    try {
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      if (!tab.id) throw new Error('No active tab found');
+
+      await browser.tabs.sendMessage(tab.id, { action: 'cancelScraping' });
+      
+      setLoading({ transcript: false, schedule: false });
+      setLoadingMessage({ transcript: '', schedule: '' });
+      setShowScanningOverlay(false);
+      setError('Scraping cancelled by user');
+      
+      // Clear error message after 3 seconds
+      setTimeout(() => {
+        setError(null);
+      }, 3000);
+    } catch (err) {
+      console.error('Error cancelling scraping:', err);
+    }
+  };
+
   const scrapeData = async (type: 'transcript' | 'schedule') => {
     setLoading(prev => ({ ...prev, [type]: true }));
     setLoadingMessage(prev => ({
@@ -520,6 +541,17 @@ function App() {
                 )}
               </Button>
             </div>
+            {/* Cancel button when loading */}
+            {loading.schedule && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={cancelScraping}
+                className="w-full border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
+              >
+                Cancel Scraping
+              </Button>
+            )}
             {/* Download button */}
             {scheduleData && !loading.schedule && (
               <Button
@@ -574,6 +606,16 @@ function App() {
                   </p>
                 </div>
               )}
+              <div className="flex justify-center pt-2">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={cancelScraping}
+                  className="w-full sm:w-auto"
+                >
+                  Cancel Scraping
+                </Button>
+              </div>
             </DialogDescription>
           </DialogHeader>
         </DialogContent>
