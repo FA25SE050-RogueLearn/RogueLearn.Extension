@@ -30,6 +30,7 @@ import {
   Image as ImageIcon,
   AlertTriangle,
 } from "lucide-react";
+import { Copy } from 'lucide-react';
 import type { TranscriptData, ScheduleData } from "@/lib/types";
 import notesApi from "@/api/notesApi";
 import tagsApi from "@/api/tagsApi";
@@ -792,6 +793,59 @@ function App() {
     }
   };
 
+  const copyAsHtml = async (type: 'transcript' | 'schedule') => {
+    const data = type === 'transcript' ? transcriptData : scheduleData;
+    if (!data) {
+      return;
+    }
+    if (type !== 'transcript' || !transcriptData) {
+      return;
+    }
+    const header = `<h2>Transcript</h2><p>Student: ${transcriptData.studentName} (${transcriptData.studentId})</p>`;
+    const rows = transcriptData.subjects
+      .map(
+        (s) =>
+          `<tr><td>${s.subjectCode}</td><td>${s.subjectName}</td><td>${s.grade}</td><td>${s.semester}</td></tr>`
+      )
+      .join('');
+    const table = `<table><thead><tr><th>Code</th><th>Course Name</th><th>Grade</th><th>Semester</th></tr></thead><tbody>${rows}</tbody></table>`;
+    const style = `<style>body{font-family:Arial,Helvetica,sans-serif;background:#fff;color:#111;padding:20px}h2{margin:0 0 10px}p{margin:0 0 16px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px;text-align:left}thead th{background:#f3f4f6}tbody tr:nth-child(even){background:#fafafa}</style>`;
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8">${style}<title>Transcript</title></head><body>${header}${table}</body></html>`;
+    try {
+      const item = new ClipboardItem({
+        'text/html': new Blob([html], { type: 'text/html' }),
+        'text/plain': new Blob([html], { type: 'text/plain' })
+      });
+      await navigator.clipboard.write([item]);
+      setLoadingMessage((prev) => ({ ...prev, transcript: 'HTML copied to clipboard' }));
+      setTimeout(() => {
+        setLoadingMessage((prev) => ({ ...prev, transcript: '' }));
+      }, 2000);
+    } catch (e) {
+      try {
+        await navigator.clipboard.writeText(html);
+        setLoadingMessage((prev) => ({ ...prev, transcript: 'HTML copied to clipboard' }));
+        setTimeout(() => {
+          setLoadingMessage((prev) => ({ ...prev, transcript: '' }));
+        }, 2000);
+      } catch (err) {
+        setError('Failed to copy HTML to clipboard');
+      }
+    }
+  };
+
+  // Loading state
+  if (isLoggedIn === null) {
+    return (
+      <div className="w-[600px] h-[500px] bg-background flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin text-accent mx-auto mb-2" />
+          <p className="text-sm text-muted-foreground">Checking login status...</p>
+        </div>
+      </div>
+    );
+  }
+
   // Not logged in state
   if (!isLoggedIn) {
     return (
@@ -1120,6 +1174,17 @@ function App() {
               >
                 <Download className="h-3 w-3 mr-1" />
                 Download as Image
+              </Button>
+            )}
+            {transcriptData && !loading.transcript && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => copyAsHtml('transcript')}
+                className="w-full"
+              >
+                <Copy className="h-3 w-3 mr-1" />
+                Copy HTML
               </Button>
             )}
           </CardContent>
