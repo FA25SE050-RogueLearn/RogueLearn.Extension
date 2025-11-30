@@ -41,6 +41,10 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { TranscriptData, ScheduleData } from '@/lib/types';
+import notesApi from '@/api/notesApi';
+import tagsApi from '@/api/tagsApi';
+import type { NoteDto } from '@/types/notes';
+import type { Tag } from '@/types/tags';
 
 // GSAP
 declare const gsap: any;
@@ -52,9 +56,14 @@ function Dashboard() {
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [notes, setNotes] = useState<NoteDto[]>([]);
+  const [tagsMap, setTagsMap] = useState<Record<string, string>>({});
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [notesPage, setNotesPage] = useState(1);
 
   useEffect(() => {
     loadData();
+    loadNotes();
 
     // Entrance animation
     if (typeof gsap !== 'undefined' && containerRef.current) {
@@ -130,9 +139,23 @@ function Dashboard() {
     setScheduleData(null);
   };
 
+  const loadNotes = async () => {
+    setNotesLoading(true);
+    try {
+      const resNotes = await notesApi.getMyNotes();
+      const list = resNotes?.data || [];
+      setNotes(list || []);
+      const resTags = await tagsApi.getMyTags();
+      const map: Record<string, string> = {};
+      (resTags?.data?.tags || []).forEach((t: Tag) => { map[t.id] = t.name; });
+      setTagsMap(map);
+    } catch {}
+    setNotesLoading(false);
+  };
+
   const calculateStats = () => {
     const coursesCount = transcriptData?.subjects?.length || 0;
-    const totalCredits = transcriptData?.subjects?.reduce((sum, s) => sum + (parseInt(s.credit) || 0), 0) || 0;
+    const totalCredits = transcriptData?.subjects?.reduce((sum, s) => sum + (s.credit || 0), 0) || 0;
     const sessionsCount = scheduleData?.sessions?.length || 0;
     const attendedCount = scheduleData?.sessions?.filter(s => s.status === 'attended').length || 0;
     const attendanceRate = sessionsCount > 0 ? Math.round((attendedCount / sessionsCount) * 100) : 0;
@@ -424,6 +447,49 @@ function Dashboard() {
                   Use the popup to scrape schedule from FAP
                 </p>
               </div>
+            )}
+          </CardContent>
+        </Card>
+        <Card className="rpg-paper-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <BookOpen className="h-5 w-5 text-accent" />
+              My Notes
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {notesLoading ? (
+              <div className="text-center py-12">
+                <Sparkles className="h-12 w-12 animate-spin text-accent mx-auto mb-4" />
+                <p className="text-muted-foreground">Loading notes...</p>
+              </div>
+            ) : notes.length === 0 ? (
+              <div className="text-center py-12">
+                <BookOpen className="h-12 w-12 text-muted-foreground mx-auto mb-4 opacity-50" />
+                <p className="text-muted-foreground">No notes available</p>
+              </div>
+            ) : (
+              <>
+                <ScrollArea className="h-[400px]">
+                  <div className="space-y-3">
+                    {notes.slice((notesPage - 1) * 5, (notesPage - 1) * 5 + 5).map((n) => (
+                      <div key={n.id} className="p-3 border rounded-md">
+                        <div className="font-medium">{n.title}</div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {(n.tagIds || []).map((id) => (
+                            <Badge key={id} variant="secondary">{tagsMap[id] || id}</Badge>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+                <div className="flex items-center justify-between mt-4">
+                  <Button variant="outline" size="sm" onClick={() => setNotesPage(p => Math.max(1, p - 1))} disabled={notesPage <= 1}>Prev</Button>
+                  <div className="text-sm text-muted-foreground">Page {notesPage} of {Math.max(1, Math.ceil(notes.length / 5))}</div>
+                  <Button variant="outline" size="sm" onClick={() => setNotesPage(p => Math.min(Math.max(1, Math.ceil(notes.length / 5)), p + 1))} disabled={notesPage >= Math.ceil(notes.length / 5)}>Next</Button>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>

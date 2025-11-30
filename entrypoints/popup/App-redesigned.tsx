@@ -3,6 +3,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Sparkles,
   Calendar,
@@ -16,6 +17,10 @@ import {
   Info
 } from 'lucide-react';
 import type { TranscriptData, ScheduleData } from '@/lib/types';
+import notesApi from '@/api/notesApi';
+import tagsApi from '@/api/tagsApi';
+import type { NoteDto } from '@/types/notes';
+import type { Tag } from '@/types/tags';
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
@@ -26,6 +31,10 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [transcriptData, setTranscriptData] = useState<TranscriptData | null>(null);
   const [scheduleData, setScheduleData] = useState<ScheduleData | null>(null);
+  const [notes, setNotes] = useState<NoteDto[]>([]);
+  const [tagsMap, setTagsMap] = useState<Record<string, string>>({});
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [notesPage, setNotesPage] = useState(1);
 
   useEffect(() => {
     checkLoginStatus();
@@ -41,6 +50,12 @@ function App() {
     browser.runtime.onMessage.addListener(handleMessage);
     return () => browser.runtime.onMessage.removeListener(handleMessage);
   }, []);
+
+  useEffect(() => {
+    if (isLoggedIn) {
+      loadNotes();
+    }
+  }, [isLoggedIn]);
 
   const checkLoginStatus = async () => {
     try {
@@ -87,13 +102,29 @@ function App() {
   };
 
   const openDashboard = () => {
-    browser.tabs.create({ url: browser.runtime.getURL('/dashboard/index.html') });
+    browser.tabs.create({ url: browser.runtime.getURL('/dashboard.html') });
+  };
+
+  const loadNotes = async () => {
+    setNotesLoading(true);
+    try {
+      const resNotes = await notesApi.getMyNotes();
+      const list = resNotes?.data || [];
+      setNotes(list || []);
+      const resTags = await tagsApi.getMyTags();
+      const map: Record<string, string> = {};
+      (resTags?.data?.tags || []).forEach((t: Tag) => { map[t.id] = t.name; });
+      setTagsMap(map);
+    } catch (e) {
+      // ignore
+    }
+    setNotesLoading(false);
   };
 
   // Loading state
   if (isLoggedIn === null) {
     return (
-      <div className="w-[600px] h-[500px] bg-background flex items-center justify-center">
+      <div className="w-[600px] h-[700px] bg-background flex items-center justify-center">
         <div className="text-center">
           <Loader2 className="h-8 w-8 animate-spin text-accent mx-auto mb-2" />
           <p className="text-sm text-muted-foreground">Checking login status...</p>
@@ -105,7 +136,7 @@ function App() {
   // Not logged in state
   if (!isLoggedIn) {
     return (
-      <div className="w-[600px] h-[500px] bg-background p-6">
+      <div className="w-[600px] h-[700px] bg-background p-6">
         <div className="h-full flex flex-col">
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
@@ -149,7 +180,7 @@ function App() {
 
   // Main app (logged in)
   return (
-    <div className="w-[600px] h-[500px] bg-background overflow-y-auto">
+    <div className="w-[600px] h-[700px] bg-background overflow-y-auto">
       {/* Header */}
       <div className="sticky top-0 bg-background/95 backdrop-blur-sm border-b border-border p-4 z-10">
         <div className="flex items-center justify-between">
@@ -301,6 +332,58 @@ function App() {
                 )}
               </Button>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Notes Card */}
+        <Card className="rpg-paper-card">
+          <CardHeader className="pb-3">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-2">
+                <BookOpen className="h-5 w-5 text-accent" />
+                <div>
+                  <CardTitle className="text-base">My Notes</CardTitle>
+                  <CardDescription className="text-xs">
+                    Titles with tags (5 per page)
+                  </CardDescription>
+                </div>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {notesLoading ? (
+              <div className="text-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-accent mx-auto mb-2" />
+                <p className="text-xs text-muted-foreground">Loading notes...</p>
+              </div>
+            ) : notes.length === 0 ? (
+              <div className="text-center py-8">
+                <BookOpen className="h-10 w-10 text-muted-foreground mx-auto mb-2 opacity-50" />
+                <p className="text-xs text-muted-foreground">No notes available</p>
+              </div>
+            ) : (
+              <>
+                <ScrollArea className="h-[220px]">
+                  <div className="space-y-3">
+                    {notes.slice((notesPage - 1) * 5, (notesPage - 1) * 5 + 5).map((n) => (
+                      <div key={n.id} className="p-3 border rounded-md">
+                        <div className="font-medium">{n.title}</div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {(n.tagIds || []).map((id) => (
+                            <Badge key={id} variant="secondary">{tagsMap[id] || id}</Badge>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+                <div className="flex items-center justify-between mt-3">
+                  <Button variant="outline" size="sm" onClick={() => setNotesPage(p => Math.max(1, p - 1))} disabled={notesPage <= 1}>Prev</Button>
+                  <div className="text-xs text-muted-foreground">Page {notesPage} of {Math.max(1, Math.ceil(notes.length / 5))}</div>
+                  <Button variant="outline" size="sm" onClick={() => setNotesPage(p => Math.min(Math.max(1, Math.ceil(notes.length / 5)), p + 1))} disabled={notesPage >= Math.ceil(notes.length / 5)}>Next</Button>
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
 
