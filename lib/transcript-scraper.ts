@@ -1,7 +1,8 @@
+// RogueLearn.Extension/lib/transcript-scraper.ts
 import type { TranscriptData, ScraperResult, SubjectGrade } from './types';
 
 /**
- * Scrapes transcript data from FPT FAP Grade page
+ * Scrapes transcript data from FAP FAP Grade page
  */
 export async function scrapeTranscript(): Promise<ScraperResult<TranscriptData>> {
   try {
@@ -21,8 +22,11 @@ export async function scrapeTranscript(): Promise<ScraperResult<TranscriptData>>
     const studentIdMatch = titleText.match(/SE\d+|[A-Z]{2}\d+/);
     const studentId = studentIdMatch ? studentIdMatch[0] : 'Unknown';
     
-    // Find the main grade table
-    const table = document.querySelector('table[class*="table"]') || document.querySelector('table');
+    // 1. TARGETING FIX: Use the specific ID from your HTML to find the grade container
+    const gradeContainer = document.getElementById('ctl00_mainContent_divGrade');
+    
+    // 2. TABLE FIX: Find the table specifically within that container
+    const table = gradeContainer ? gradeContainer.querySelector('table') : document.querySelector('table.table');
     
     if (!table) {
       return {
@@ -31,28 +35,86 @@ export async function scrapeTranscript(): Promise<ScraperResult<TranscriptData>>
       };
     }
 
+    // 3. DYNAMIC HEADER MAPPING: Read <thead> to find exact column indices
+    // This makes it work even if FAP adds a new column in the future
+    const headerCells = Array.from(table.querySelectorAll('thead th'));
+    const headers = headerCells.map(th => th.textContent?.trim().toLowerCase() || '');
+
+    // Default indices based on the HTML you provided (0-based index)
+    const idx = {
+      no: 0,
+      term: 1,
+      semester: 2,
+      code: 3,
+      prereq: 4,
+      replaced: 5,
+      name: 6,
+      credit: 7,
+      grade: 8,
+      status: 9
+    };
+
+    // Update indices if headers are found
+    if (headers.length > 0) {
+      const findIdx = (key: string) => headers.findIndex(h => h.includes(key));
+      
+      const noIdx = findIdx('no');
+      if (noIdx !== -1) idx.no = noIdx;
+
+      const termIdx = findIdx('term');
+      if (termIdx !== -1) idx.term = termIdx;
+
+      const semIdx = findIdx('semester');
+      if (semIdx !== -1) idx.semester = semIdx;
+
+      const codeIdx = findIdx('subject code');
+      if (codeIdx !== -1) idx.code = codeIdx;
+
+      const prereqIdx = findIdx('prerequisite');
+      if (prereqIdx !== -1) idx.prereq = prereqIdx;
+
+      const replacedIdx = findIdx('replaced');
+      if (replacedIdx !== -1) idx.replaced = replacedIdx;
+
+      const nameIdx = findIdx('subject name');
+      if (nameIdx !== -1) idx.name = nameIdx;
+
+      const creditIdx = findIdx('credit');
+      if (creditIdx !== -1) idx.credit = creditIdx;
+
+      const gradeIdx = findIdx('grade');
+      if (gradeIdx !== -1) idx.grade = gradeIdx;
+
+      const statusIdx = findIdx('status');
+      if (statusIdx !== -1) idx.status = statusIdx;
+    }
+
+    console.log('Column mapping:', idx);
+
     const subjects: SubjectGrade[] = [];
+    // 4. ROW EXTRACTION: Only look at rows inside the tbody of this specific table
     const rows = table.querySelectorAll('tbody tr');
 
-    rows.forEach((row, index) => {
+    rows.forEach((row) => {
       const cells = row.querySelectorAll('td');
       
-      // Skip if not enough cells (header rows or empty rows)
-      if (cells.length < 7) return;
+      // Validation: Check if the row has enough cells to cover the Max Index we need
+      const maxIndex = Math.max(...Object.values(idx));
+      if (cells.length <= maxIndex) return;
 
-      const no = parseInt(cells[0]?.textContent?.trim() || '0');
-      const term = parseInt(cells[1]?.textContent?.trim() || '0');
-      const semester = cells[2]?.textContent?.trim() || '';
-      const subjectCode = cells[3]?.textContent?.trim() || '';
-      const prerequisite = cells[4]?.textContent?.trim() || undefined;
-      const replacedSubject = cells[5]?.textContent?.trim() || undefined;
-      const subjectName = cells[6]?.textContent?.trim() || '';
-      const credit = parseInt(cells[7]?.textContent?.trim() || '0');
-      const grade = cells[8]?.textContent?.trim() || '';
-      const status = cells[9]?.textContent?.trim() || '';
+      const no = parseInt(cells[idx.no]?.textContent?.trim() || '0');
+      const term = parseInt(cells[idx.term]?.textContent?.trim() || '0');
+      const semester = cells[idx.semester]?.textContent?.trim() || '';
+      const subjectCode = cells[idx.code]?.textContent?.trim() || '';
+      const prerequisite = cells[idx.prereq]?.textContent?.trim() || undefined;
+      const replacedSubject = cells[idx.replaced]?.textContent?.trim() || undefined;
+      const subjectName = cells[idx.name]?.textContent?.trim() || '';
+      const credit = parseInt(cells[idx.credit]?.textContent?.trim() || '0');
+      const grade = cells[idx.grade]?.textContent?.trim() || '';
+      const status = cells[idx.status]?.textContent?.trim() || '';
 
       // Only add if we have valid data
-      if (no && subjectCode && subjectName) {
+      if (subjectCode && subjectName) {
         subjects.push({
           no,
           term,

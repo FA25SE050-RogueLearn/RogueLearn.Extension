@@ -1,3 +1,4 @@
+// RogueLearn.Extension/entrypoints/popup/App.tsx
 import { useState, useEffect, useRef } from "react";
 import {
   Card,
@@ -232,7 +233,7 @@ function App() {
             searchResultsRef.current?.scrollIntoView({ behavior: "smooth" });
           }, 300);
         }
-      } catch {}
+      } catch { }
     };
 
     setTimeout(recheckPendingSearch, 400);
@@ -550,7 +551,7 @@ function App() {
         "pendingSearchQuery",
       ]);
       console.log("[popup] clearSearch: storage keys removed");
-    } catch {}
+    } catch { }
   };
 
   const renderSearchResults = () => {
@@ -682,6 +683,7 @@ function App() {
         ctx.fillText("Course Name", 140, yPos);
         ctx.fillText("Grade", 480, yPos);
         ctx.fillText("Semester", 560, yPos);
+        ctx.fillText("Status", 660, yPos); // Added status column
 
         // Draw courses
         ctx.font = "13px Arial, sans-serif";
@@ -703,6 +705,14 @@ function App() {
           ctx.fillStyle = index % 2 === 0 ? "#FAFAFA" : "#D0D0D0";
           ctx.font = "13px Arial, sans-serif";
           ctx.fillText(subject.semester, 560, yPos);
+
+          // Status with color
+          if (subject.status === 'Passed') ctx.fillStyle = '#22c55e';
+          else if (subject.status === 'Studying') ctx.fillStyle = '#3b82f6';
+          else ctx.fillStyle = '#dc2626';
+
+          ctx.font = "bold 13px Arial, sans-serif";
+          ctx.fillText(subject.status || '-', 660, yPos);
         });
       } else if (type === "schedule" && scheduleData) {
         ctx.fillText(`Week Range: ${scheduleData.weekRange}`, 40, 90);
@@ -736,8 +746,8 @@ function App() {
             statusText === "attended"
               ? "#22c55e"
               : statusText === "absent"
-              ? "#dc2626"
-              : "#D0D0D0";
+                ? "#dc2626"
+                : "#D0D0D0";
           ctx.font = "bold 12px Arial, sans-serif";
           ctx.fillText(statusText, 620, yPos);
           ctx.font = "13px Arial, sans-serif";
@@ -804,11 +814,19 @@ function App() {
     const header = `<h2>Transcript</h2><p>Student: ${transcriptData.studentName} (${transcriptData.studentId})</p>`;
     const rows = transcriptData.subjects
       .map(
-        (s) =>
-          `<tr><td>${s.subjectCode}</td><td>${s.subjectName}</td><td>${s.grade}</td><td>${s.semester}</td></tr>`
+        (s) => {
+          // Color code status for HTML export
+          let statusColor = '#333';
+          if (s.status === 'Passed') statusColor = '#22c55e'; // Green
+          else if (s.status === 'Not passed') statusColor = '#dc2626'; // Red
+          else if (s.status === 'Studying') statusColor = '#3b82f6'; // Blue
+
+          return `<tr><td>${s.subjectCode}</td><td>${s.subjectName}</td><td>${s.grade}</td><td>${s.semester}</td><td style="color:${statusColor};font-weight:bold">${s.status}</td></tr>`;
+        }
       )
       .join('');
-    const table = `<table><thead><tr><th>Code</th><th>Course Name</th><th>Grade</th><th>Semester</th></tr></thead><tbody>${rows}</tbody></table>`;
+    // Added Status Column to Header
+    const table = `<table><thead><tr><th>Code</th><th>Course Name</th><th>Grade</th><th>Semester</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`;
     const style = `<style>body{font-family:Arial,Helvetica,sans-serif;background:#fff;color:#111;padding:20px}h2{margin:0 0 10px}p{margin:0 0 16px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px;text-align:left}thead th{background:#f3f4f6}tbody tr:nth-child(even){background:#fafafa}</style>`;
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8">${style}<title>Transcript</title></head><body>${header}${table}</body></html>`;
     try {
@@ -1043,7 +1061,7 @@ function App() {
     );
   }
 
-  // Main app (logged in)
+  // MAIN APP VIEW (Logged In)
   return (
     <div className="w-[600px] min-h-[70vh] bg-background overflow-y-auto">
       {/* Header */}
@@ -1375,7 +1393,7 @@ function App() {
       </div>
 
       {/* Scanning Overlay */}
-      <Dialog open={showScanningOverlay} onOpenChange={() => {}}>
+      <Dialog open={showScanningOverlay} onOpenChange={() => { }}>
         <DialogContent
           className="sm:max-w-md"
           onPointerDownOutside={(e) => e.preventDefault()}
