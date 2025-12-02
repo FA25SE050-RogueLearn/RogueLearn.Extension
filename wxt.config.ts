@@ -12,6 +12,8 @@ export default defineConfig({
       "https://roguelearn.site/*",
       "http://localhost/*",
       "http://localhost:*/**",
+       "https://fap.fpt.edu.vn/*",
+      "https://flm.fpt.edu.vn/*",
     ],
     name: 'RogueLearn',
     action: {}, 

@@ -28,37 +28,64 @@ import {
   Zap,
   Info,
   Download,
-  Image as ImageIcon,
+  FileText, // Imported for the FLM card
   AlertTriangle,
 } from "lucide-react";
 import { Copy } from 'lucide-react';
 import type { TranscriptData, ScheduleData } from "@/lib/types";
 import notesApi from "@/api/notesApi";
 import tagsApi from "@/api/tagsApi";
+import subjectsApi from "@/api/subjectsApi"; // NEW: Import subjectsApi
 import type { NoteDto } from "@/types/notes";
 import type { Tag } from "@/types/tags";
 import {
   getAccessTokenFromCookies,
   getRefreshTokenFromCookies,
   getAppOrigin,
+  checkIsAdmin,
 } from "@/lib/auth";
 import { browser } from "wxt/browser";
 
+// FLM page status type
+interface FlmPageStatus {
+  isFlmDomain: boolean;
+  isLoggedIn: boolean;
+  isSyllabusDetailsPage: boolean;
+  syllabusId: string | null;
+  errorMessage: string | null;
+}
+
+// Admin status type
+interface AdminStatus {
+  isAdmin: boolean;
+  roles: string[];
+  email: string | null;
+}
+
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
+  // NEW: State to track FLM page status with detailed validation
+  const [flmPageStatus, setFlmPageStatus] = useState<FlmPageStatus | null>(null);
+  // NEW: State to track admin status for syllabus import permission
+  const [adminStatus, setAdminStatus] = useState<AdminStatus | null>(null);
+
   const [loading, setLoading] = useState<{
     transcript: boolean;
     schedule: boolean;
+    syllabus: boolean; // NEW: Loading state for syllabus import
   }>({
     transcript: false,
     schedule: false,
+    syllabus: false,
   });
   const [loadingMessage, setLoadingMessage] = useState<{
     transcript: string;
     schedule: string;
+    syllabus: string; // NEW: Message for syllabus import
   }>({
     transcript: "",
     schedule: "",
+    syllabus: "",
   });
   const [error, setError] = useState<string | null>(null);
   const [transcriptData, setTranscriptData] = useState<TranscriptData | null>(
@@ -81,6 +108,37 @@ function App() {
 
   useEffect(() => {
     console.log("[popup] mount: starting initialization");
+
+    // Check admin status for syllabus import permission
+    checkIsAdmin().then((status) => {
+      console.log("[popup] Admin status:", status);
+      setAdminStatus(status);
+    });
+
+    // NEW: Check FLM page status when on FLM domain
+    browser.tabs.query({ active: true, currentWindow: true }).then(async (tabs) => {
+      if (tabs[0]?.url && tabs[0].id) {
+        const url = tabs[0].url;
+        if (url.includes("flm.fpt.edu.vn")) {
+          // Get detailed page status from content script
+          try {
+            const status = await browser.tabs.sendMessage(tabs[0].id, { action: "checkFlmPageStatus" }) as FlmPageStatus;
+            console.log("[popup] FLM page status:", status);
+            setFlmPageStatus(status);
+          } catch (e) {
+            console.warn("[popup] Failed to get FLM page status:", e);
+            // Fallback - at least mark we're on FLM domain
+            setFlmPageStatus({
+              isFlmDomain: true,
+              isLoggedIn: false,
+              isSyllabusDetailsPage: false,
+              syllabusId: null,
+              errorMessage: "Could not check page status. The page may still be loading."
+            });
+          }
+        }
+      }
+    });
 
     const handleMessage = (message: any) => {
       if (message.action === "scrapingComplete") {
@@ -443,8 +501,8 @@ function App() {
 
       await browser.tabs.sendMessage(tab.id, { action: "cancelScraping" });
 
-      setLoading({ transcript: false, schedule: false });
-      setLoadingMessage({ transcript: "", schedule: "" });
+      setLoading({ transcript: false, schedule: false, syllabus: false });
+      setLoadingMessage({ transcript: "", schedule: "", syllabus: "" });
       setShowScanningOverlay(false);
       setError("Scraping cancelled by user");
 
@@ -454,6 +512,77 @@ function App() {
       }, 3000);
     } catch (err) {
       console.error("[popup] cancelScraping: error", err);
+    }
+  };
+
+  // NEW: Handle Syllabus Import for FLM
+  const handleImportSyllabus = async () => {
+    setLoading(prev => ({ ...prev, syllabus: true }));
+    setLoadingMessage(prev => ({ ...prev, syllabus: "Extracting page content..." }));
+    setError(null);
+
+    try {
+      // 1. Scrape Content from FLM page via content script
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      if (!tab.id) throw new Error("No active tab");
+
+      const scrapeResult: any = await browser.tabs.sendMessage(tab.id, { action: "scrapeSyllabus" });
+
+      if (!scrapeResult || !scrapeResult.success) {
+        throw new Error(scrapeResult?.error || "Failed to scrape page content");
+      }
+
+      setLoadingMessage(prev => ({ ...prev, syllabus: "Sending to AI for analysis (this may take 30s)..." }));
+
+      // 2. Send to Backend API
+      console.log('[popup] Sending to API, HTML length:', scrapeResult.data.rawHtml.length);
+      const apiResult = await subjectsApi.importFromText(scrapeResult.data.rawHtml);
+
+      // If we reach here, the API call was successful
+      setLoadingMessage(prev => ({ ...prev, syllabus: "Done! Subject updated." }));
+      setTimeout(() => {
+        setLoading(prev => ({ ...prev, syllabus: false }));
+        setLoadingMessage(prev => ({ ...prev, syllabus: "" }));
+        // Show simple success feedback (could be replaced with a Toast component if available)
+        alert(`Success! Imported ${apiResult.data.subjectCode} - ${apiResult.data.subjectName}`);
+      }, 1000);
+
+    } catch (err: any) {
+      console.error("Import failed", err);
+      setError(err.message || "Import failed");
+      setLoading(prev => ({ ...prev, syllabus: false }));
+    }
+  };
+
+  // Copy syllabus HTML to clipboard
+  const handleCopySyllabusHtml = async () => {
+    setLoading(prev => ({ ...prev, syllabus: true }));
+    setLoadingMessage(prev => ({ ...prev, syllabus: "Extracting HTML..." }));
+    setError(null);
+
+    try {
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      if (!tab.id) throw new Error("No active tab");
+
+      const scrapeResult: any = await browser.tabs.sendMessage(tab.id, { action: "scrapeSyllabus" });
+
+      if (!scrapeResult || !scrapeResult.success) {
+        throw new Error(scrapeResult?.error || "Failed to scrape page content");
+      }
+
+      // Copy to clipboard
+      await navigator.clipboard.writeText(scrapeResult.data.rawHtml);
+      
+      setLoadingMessage(prev => ({ ...prev, syllabus: `Copied! (${scrapeResult.data.rawHtml.length} chars)` }));
+      setTimeout(() => {
+        setLoading(prev => ({ ...prev, syllabus: false }));
+        setLoadingMessage(prev => ({ ...prev, syllabus: "" }));
+      }, 2000);
+
+    } catch (err: any) {
+      console.error("Copy failed", err);
+      setError(err.message || "Failed to copy HTML");
+      setLoading(prev => ({ ...prev, syllabus: false }));
     }
   };
 
@@ -852,8 +981,8 @@ function App() {
     }
   };
 
-  // Loading state
-  if (isLoggedIn === null) {
+  // Loading state (only show if not on FLM domain)
+  if (isLoggedIn === null && !flmPageStatus?.isFlmDomain) {
     return (
       <div className="w-[600px] h-[500px] bg-background flex items-center justify-center">
         <div className="text-center">
@@ -864,7 +993,258 @@ function App() {
     );
   }
 
-  // Not logged in state
+  // FLM Page View - Show FLM-specific UI regardless of FAP login status
+  if (flmPageStatus?.isFlmDomain) {
+    return (
+      <div className="w-[600px] min-h-[70vh] bg-background overflow-y-auto">
+        {/* Header */}
+        <div className="sticky top-0 bg-background/95 backdrop-blur-sm border-b border-border p-4 z-10">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-accent rpg-glow-gold" />
+              <h1 className="text-lg font-bold text-foreground">
+                RogueLearn Helper
+              </h1>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge
+                variant="outline"
+                className="bg-primary/20 text-primary border-primary/50"
+              >
+                FLM Mode
+              </Badge>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-4 space-y-3">
+          {error && (
+            <Card className="border-destructive/50 bg-destructive/10">
+              <CardContent className="pt-4">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 text-destructive mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-sm text-destructive font-medium">Error</p>
+                    <p className="text-xs text-muted-foreground mt-1">{error}</p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setError(null)}
+                    className="h-6 w-6 p-0"
+                  >
+                    ×
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* FLM IMPORT CARD - Only show for admin users */}
+          {adminStatus?.isAdmin ? (
+            <Card className={`rpg-paper-card ${flmPageStatus.isSyllabusDetailsPage ? 'border-primary/50 bg-primary/5' : 'border-warning/50 bg-warning/5'}`}>
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-2">
+                    <FileText className={`h-5 w-5 ${flmPageStatus.isSyllabusDetailsPage ? 'text-primary' : 'text-warning'}`} />
+                    <div>
+                      <CardTitle className="text-base">Admin: Syllabus Import</CardTitle>
+                      <CardDescription className="text-xs">
+                        {flmPageStatus.isSyllabusDetailsPage 
+                          ? `Ready to import syllabus (ID: ${flmPageStatus.syllabusId})` 
+                          : "Navigate to a Syllabus Details page to import"}
+                      </CardDescription>
+                    </div>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {/* Status indicators */}
+                <div className="flex flex-wrap gap-2 mb-3">
+                  <Badge variant="default" className="text-xs bg-primary">
+                    Admin: {adminStatus.roles.join(', ')}
+                  </Badge>
+                  <Badge variant={flmPageStatus.isLoggedIn ? "default" : "destructive"} className="text-xs">
+                    {flmPageStatus.isLoggedIn ? "Logged In to FLM" : "Not Logged In to FLM"}
+                  </Badge>
+                  <Badge variant={flmPageStatus.isSyllabusDetailsPage ? "default" : "secondary"} className="text-xs">
+                    {flmPageStatus.isSyllabusDetailsPage ? "On Syllabus Page" : "Not on Syllabus Page"}
+                  </Badge>
+                </div>
+                
+                {loading.syllabus && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span>{loadingMessage.syllabus}</span>
+                  </div>
+                )}
+                
+                {/* Show warning if not on correct page */}
+                {!flmPageStatus.isSyllabusDetailsPage && (
+                  <div className="flex items-start gap-2 text-xs text-warning mb-3 p-2 bg-warning/10 rounded-md">
+                    <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                    <span>{flmPageStatus.errorMessage || "Navigate to a subject's Syllabus Details page to import (URL should contain: SyllabusDetails?sylID=...)."}</span>
+                  </div>
+                )}
+                
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleImportSyllabus}
+                    disabled={loading.syllabus || !flmPageStatus.isSyllabusDetailsPage}
+                    className="flex-1 rpg-glow-gold"
+                  >
+                    <Zap className="h-3 w-3 mr-2" />
+                    Import
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={handleCopySyllabusHtml}
+                    disabled={loading.syllabus || !flmPageStatus.isSyllabusDetailsPage}
+                    className="flex-1"
+                  >
+                    <Copy className="h-3 w-3 mr-2" />
+                    Copy HTML
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            /* Not admin - show info card */
+            <Card className="bg-muted/50 border-muted">
+              <CardContent className="pt-4">
+                <div className="flex items-start gap-2">
+                  <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">FLM Page Detected</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {adminStatus === null 
+                        ? "Checking permissions..." 
+                        : "Syllabus import is only available for admin users. Please log in to RogueLearn with an admin account."}
+                    </p>
+                    {adminStatus && !adminStatus.isAdmin && adminStatus.email && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Logged in as: {adminStatus.email}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Helper Tip for FLM - only show for admins */}
+          {adminStatus?.isAdmin && (
+            <Card className="bg-info/10 border-info/30">
+              <CardContent className="pt-4">
+                <div className="flex items-start gap-2">
+                  <Info className="h-4 w-4 text-info mt-0.5 shrink-0" />
+                  <p className="text-xs text-muted-foreground">
+                    <strong>Tip:</strong> To import a syllabus, navigate to a subject's Syllabus Details page on FLM. 
+                    The URL should look like: <code className="bg-muted px-1 rounded">flm.fpt.edu.vn/gui/role/student/SyllabusDetails?sylID=...</code>
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Notes section still accessible on FLM */}
+          <Card className="rpg-paper-card">
+            <CardHeader className="pb-3">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-2">
+                  <BookOpen className="h-5 w-5 text-accent" />
+                  <div>
+                    <CardTitle className="text-base">My Notes</CardTitle>
+                    <CardDescription className="text-xs">
+                      Titles with tags (5 per page)
+                    </CardDescription>
+                  </div>
+                </div>
+                <div className="ml-auto">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => loadNotes(true)}
+                  >
+                    <RefreshCw className="h-3 w-3 mr-1" /> Refresh
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {notesLoading ? (
+                <div className="text-center py-8">
+                  <Loader2 className="h-5 w-5 animate-spin text-accent mx-auto mb-2" />
+                  <p className="text-xs text-muted-foreground">
+                    Loading notes...
+                  </p>
+                </div>
+              ) : notes.length === 0 ? (
+                <div className="text-center py-8">
+                  <BookOpen className="h-10 w-10 text-muted-foreground mx-auto mb-2 opacity-50" />
+                  <p className="text-xs text-muted-foreground">
+                    No notes available
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <ScrollArea className="h-[180px]">
+                    <div className="space-y-3">
+                      {notes
+                        .slice((notesPage - 1) * 5, (notesPage - 1) * 5 + 5)
+                        .map((n) => (
+                          <div key={n.id} className="p-3 border rounded-md">
+                            <div className="font-medium">{n.title}</div>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {(n.tagIds || []).map((id) => (
+                                <Badge key={id} variant="secondary">
+                                  {tagsMap[id] || id}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </ScrollArea>
+                  <div className="flex items-center justify-between mt-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setNotesPage((p) => Math.max(1, p - 1))}
+                      disabled={notesPage <= 1}
+                    >
+                      Prev
+                    </Button>
+                    <div className="text-xs text-muted-foreground">
+                      Page {notesPage} of{" "}
+                      {Math.max(1, Math.ceil(notes.length / 5))}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        setNotesPage((p) =>
+                          Math.min(
+                            Math.max(1, Math.ceil(notes.length / 5)),
+                            p + 1
+                          )
+                        )
+                      }
+                      disabled={notesPage >= Math.ceil(notes.length / 5)}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  // Not logged in state (FAP-specific, only when NOT on FLM)
   if (!isLoggedIn) {
     return (
       <div className="w-[600px] h-[70vh] bg-background p-6">
@@ -1093,7 +1473,6 @@ function App() {
       </div>
 
       <div className="p-4 space-y-3">
-        {/* Error Display */}
         {error && (
           <Card className="border-destructive/50 bg-destructive/10">
             <CardContent className="pt-4">

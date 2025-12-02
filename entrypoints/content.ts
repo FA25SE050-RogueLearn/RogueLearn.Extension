@@ -1,10 +1,15 @@
+// RogueLearn.Extension/entrypoints/content.ts
 import { scrapeTranscript } from '@/lib/transcript-scraper';
 import { scrapeSchedule } from '@/lib/schedule-scraper';
+import { scrapeSyllabusFromPage, getFlmPageStatus, type FlmPageStatus } from '@/lib/flm-scraper';
 
 export default defineContentScript({
-  matches: ['*://fap.fpt.edu.vn/*'],
+  matches: [
+    '*://fap.fpt.edu.vn/*',
+    '*://flm.fpt.edu.vn/*'
+  ],
   main() {
-    console.log('FPT FAP Helper - Content script loaded');
+    console.log('FPT FAP/FLM Helper - Content script loaded');
     console.log('Current URL:', window.location.href);
 
     // Auto-continue schedule scraping if in progress
@@ -77,6 +82,24 @@ export default defineContentScript({
         return true;
       }
 
+      // NEW: Handle FLM Page Status Check (for UI to know if import button should be enabled)
+      if (message.action === 'checkFlmPageStatus') {
+        console.log('[Content] Checking FLM page status...');
+        const status = getFlmPageStatus();
+        console.log('[Content] FLM page status:', status);
+        sendResponse(status);
+        return true;
+      }
+
+      // NEW: Handle FLM Syllabus Scrape
+      if (message.action === 'scrapeSyllabus') {
+        console.log('[Content] Scraping syllabus...');
+        const result = scrapeSyllabusFromPage();
+        console.log('[Content] Syllabus result:', result);
+        sendResponse(result);
+        return true;
+      }
+
       return false;
     });
   },
@@ -90,6 +113,18 @@ function checkIfLoggedIn(): boolean {
   const currentUrl = window.location.href;
   console.log('Current URL:', currentUrl);
   
+  // FLM Check
+  if (currentUrl.includes('flm.fpt.edu.vn')) {
+      // Simple heuristic for FLM - usually requires auth to see content
+      // A more robust check might look for a logout button or user profile element
+      const logoutLink = document.querySelector('a[href*="LogOut"], a[href*="logout"]');
+      if (logoutLink) return true;
+      
+      // Fallback: if we are on a detail page, likely logged in
+      if (document.querySelector('#divContent')) return true;
+  }
+
+  // FAP Check
   // These URLs only exist when logged in
   if (currentUrl.includes('fap.fpt.edu.vn/Student.aspx') || 
       currentUrl.includes('fap.fpt.edu.vn/Thongbao.aspx') ||
@@ -118,4 +153,3 @@ function checkIfLoggedIn(): boolean {
   console.log('Not logged in');
   return false;
 }
-
