@@ -2,7 +2,8 @@
 import type { ScraperResult } from './types';
 
 export interface SyllabusImportData {
-  rawHtml: string;
+  rawHtml: string; // We keep this for backward compatibility or if backend needs full HTML
+  structuredText: string; // New field for the optimized AI prompt input
   sourceUrl: string;
   syllabusId: string;
 }
@@ -111,6 +112,73 @@ export function getFlmPageStatus(): FlmPageStatus {
 }
 
 /**
+ * Extract text from a table row-by-row to preserve structure for AI
+ */
+function extractTableData(tableId: string): string {
+    const table = document.querySelector(`#${tableId}`);
+    if (!table) return '';
+
+    let text = `\n--- TABLE: ${tableId} ---\n`;
+    const rows = table.querySelectorAll('tr');
+    
+    // Extract headers
+    const headers = Array.from(rows[0]?.querySelectorAll('th') || []).map(th => th.textContent?.trim());
+    if (headers.length > 0) {
+        text += `| ${headers.join(' | ')} |\n`;
+        text += `| ${headers.map(() => '---').join(' | ')} |\n`;
+    }
+
+    // Extract body
+    rows.forEach((row, rowIndex) => {
+        if (rowIndex === 0 && headers.length > 0) return; // Skip header row if processed
+        const cells = Array.from(row.querySelectorAll('td')).map(td => {
+            // Clean up cell content: remove extra whitespace, handle inner newlines
+            return td.textContent?.trim().replace(/\s+/g, ' ') || '';
+        });
+        if (cells.length > 0) {
+             text += `| ${cells.join(' | ')} |\n`;
+        }
+    });
+    
+    return text + '\n';
+}
+
+/**
+ * Extracts key-value pairs from the main syllabus info section
+ */
+function extractGeneralInfo(): string {
+    const infoMap: Record<string, string> = {
+        'Subject Code': '#lblSubjectCode',
+        'Subject Name': '#lblSyllabusName',
+        'Subject English Name': '#lblSyllabusNameEnglish',
+        'Credits (NoCredit)': '#lblNoCredit',
+        'Degree Level': '#lblDegreeLevel',
+        'Time Allocation': '#lblTimeAllocation',
+        'Pre-Requisite': '#lblPreRequisite',
+        'Description': '#lblDescription',
+        'Student Tasks': '#lblStudentTask',
+        'Tools': '#lblTools',
+        'Approved Date': '#lblApprovedDate',
+        'Note': '#lblNote',
+        'Min Avg Mark': '#lblMinAvgMarkToPass'
+    };
+
+    let text = "--- GENERAL INFORMATION ---\n";
+    for (const [label, selector] of Object.entries(infoMap)) {
+        const element = document.querySelector(selector);
+        if (element) {
+            const value = element.textContent?.trim() || '';
+            // Only add if value exists to reduce token usage
+            if (value) {
+                text += `${label}: ${value}\n`;
+            }
+        }
+    }
+    return text + "\n";
+}
+
+
+/**
  * Scrapes syllabus data from FLM SyllabusDetails page
  * This should only be called AFTER validating the page status
  */
@@ -119,93 +187,56 @@ export function scrapeSyllabusFromPage(): ScraperResult<SyllabusImportData> {
     // Step 1: Validate we're on the correct page
     const pageStatus = getFlmPageStatus();
     
-    if (!pageStatus.isFlmDomain) {
-      return { 
+    if (!pageStatus.isFlmDomain || !pageStatus.isLoggedIn || !pageStatus.isSyllabusDetailsPage) {
+       return { 
         success: false, 
-        error: pageStatus.errorMessage || "Not on FLM website."
+        error: pageStatus.errorMessage || "Validation failed."
       };
     }
+
+    // Step 2: Extract Structured Text for AI
+    // We construct a structured text representation specifically designed for the AI prompt
+    let structuredText = "";
     
-    if (!pageStatus.isLoggedIn) {
-      return { 
-        success: false, 
-        error: pageStatus.errorMessage || "Not logged into FLM. Please log in first."
-      };
-    }
-    
-    if (!pageStatus.isSyllabusDetailsPage) {
-      return { 
-        success: false, 
-        error: pageStatus.errorMessage || "Not on a Syllabus Details page. Please navigate to a subject's syllabus page first."
-      };
-    }
+    // 2.1 General Info (Subject Code, Name, Credits, etc.)
+    structuredText += extractGeneralInfo();
 
-    // Step 2: Validate syllabus content exists on the page
-    // Check for key syllabus elements
-    const syllabusIdElement = document.querySelector('#lblSyllabusID');
-    const subjectCodeElement = document.querySelector('#lblSubjectCode');
-    const syllabusNameElement = document.querySelector('#lblSyllabusName');
-    
-    if (!syllabusIdElement && !subjectCodeElement) {
-      return {
-        success: false,
-        error: "Could not find syllabus data on this page. The page may still be loading."
-      };
-    }
+    // 2.2 Learning Outcomes
+    structuredText += extractTableData('gvLO');
 
-    // Step 3: Find the main content container
-    const potentialContainers = [
-        '#content',           // Main content div based on the HTML sample
-        '#divContent', 
-        '#mainContent',
-        '.table-detail',      // Syllabus detail table
-        'form#form2'          // The main form wrapper
-    ];
+    // 2.3 Materials
+    structuredText += extractTableData('gvMaterial');
 
-    let contentElement: Element | null = null;
+    // 2.4 Schedule
+    structuredText += extractTableData('gvSchedule');
 
-    for (const selector of potentialContainers) {
-        const el = document.querySelector(selector);
-        if (el) {
-            console.log(`[RogueLearn FLM] Found syllabus container: ${selector}`);
-            contentElement = el;
-            break;
+    // 2.5 Assessments
+    structuredText += extractTableData('gvAssessment');
+
+    // 2.6 Constructive Questions (if any)
+    const cqTable = document.querySelector('#gvCQ');
+    if (cqTable) {
+        structuredText += extractTableData('gvCQ');
+    } else {
+        // Fallback check for the message span if table is missing
+        const cqMessage = document.querySelector('#blbMessageCQ')?.textContent;
+        if (cqMessage) {
+            structuredText += `\nConstructive Questions Note: ${cqMessage}\n`;
         }
     }
 
-    // Fallback to document body if no specific container found
-    if (!contentElement) {
-        console.warn("[RogueLearn FLM] Specific container not found, falling back to body.");
-        contentElement = document.body;
-    }
+    console.log(`[RogueLearn FLM] Successfully scraped structured syllabus. Length: ${structuredText.length}`);
 
-    // Step 4: Extract HTML content
+    // Step 3: Fallback Raw HTML (in case backend still relies on it or for debugging)
+    // We try to grab the main container to keep it cleaner than document.body
+    const contentElement = document.querySelector('#divContent') || document.body;
     const rawHtml = contentElement.innerHTML;
-
-    if (!rawHtml || rawHtml.length < 500) {
-        return {
-            success: false,
-            error: "Page content appears empty or incomplete. Please wait for the page to fully load."
-        };
-    }
-
-    // Step 5: Verify we captured essential syllabus data
-    const hasSubjectCode = rawHtml.includes('SubjectCode') || rawHtml.includes('Subject Code') || subjectCodeElement;
-    const hasSyllabusData = rawHtml.includes('gvSchedule') || rawHtml.includes('SessionSchedule') || rawHtml.includes('gvLO');
-    
-    if (!hasSubjectCode) {
-      return {
-        success: false,
-        error: "Could not detect subject code in page content. Please ensure you are on a valid Syllabus Details page."
-      };
-    }
-
-    console.log(`[RogueLearn FLM] Successfully scraped syllabus. Content length: ${rawHtml.length}, SylID: ${pageStatus.syllabusId}`);
 
     return {
       success: true,
       data: {
-        rawHtml: rawHtml,
+        rawHtml: rawHtml, // Keep for legacy/fallback support
+        structuredText: structuredText, // Primary field for AI processing
         sourceUrl: window.location.href,
         syllabusId: pageStatus.syllabusId || 'unknown'
       }
