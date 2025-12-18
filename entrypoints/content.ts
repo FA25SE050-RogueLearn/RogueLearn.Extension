@@ -1,12 +1,10 @@
 // User/entrypoints/content.ts
 import { scrapeTranscript } from '@/lib/transcript-scraper';
 import { scrapeSchedule } from '@/lib/schedule-scraper';
-// Removed FLM imports
 
 export default defineContentScript({
   matches: [
     '*://fap.fpt.edu.vn/*',
-    // Removed FLM match
   ],
   main() {
     console.log('RogueLearn Student - Content script loaded');
@@ -68,8 +66,22 @@ export default defineContentScript({
         sendResponse({ success: true, cancelled: true });
         return true;
       }
+
+      // --- NEW: Handle Copy HTML Request ---
+      if (message.action === 'copyPageHtml') {
+        try {
+          const html = document.documentElement.outerHTML;
+          navigator.clipboard.writeText(html).then(() => {
+            sendResponse({ success: true, length: html.length });
+          }).catch(err => {
+            sendResponse({ success: false, error: err.message });
+          });
+        } catch (e: any) {
+          sendResponse({ success: false, error: e.message });
+        }
+        return true; // Async response
+      }
       
-      // Removed FLM actions
       return false;
     });
   },

@@ -29,12 +29,11 @@ import {
   Info,
   Download,
   AlertTriangle,
+  Copy, // Make sure Copy is imported
 } from "lucide-react";
-import { Copy } from 'lucide-react';
 import type { TranscriptData, ScheduleData } from "@/lib/types";
 import notesApi from "@/api/notesApi";
 import tagsApi from "@/api/tagsApi";
-// Removed subjectsApi
 import type { NoteDto } from "@/types/notes";
 import type { Tag } from "@/types/tags";
 import {
@@ -48,10 +47,13 @@ function App() {
   const [loading, setLoading] = useState<{
     transcript: boolean;
     schedule: boolean;
+    copyHtml: boolean; // Added loading state for copy
   }>({
     transcript: false,
     schedule: false,
+    copyHtml: false,
   });
+
   const [loadingMessage, setLoadingMessage] = useState<{
     transcript: string;
     schedule: string;
@@ -60,6 +62,7 @@ function App() {
     schedule: "",
   });
   const [error, setError] = useState<string | null>(null);
+  // ... other states ...
   const [transcriptData, setTranscriptData] = useState<TranscriptData | null>(null);
   const [scheduleData, setScheduleData] = useState<ScheduleData | null>(null);
   const [showScanningOverlay, setShowScanningOverlay] = useState(false);
@@ -76,6 +79,7 @@ function App() {
   const hasPendingSearchRef = useRef<boolean>(false);
   const initialLoadTimeoutRef = useRef<number | null>(null);
 
+  // ... useEffect logic same as before ...
   useEffect(() => {
     // Only check FAP login
     checkLoginStatus();
@@ -130,13 +134,14 @@ function App() {
       }
     };
 
-    // ... (Storage listener logic remains same for Notes/Search) ...
     const onChanged = (changes: Record<string, any>, area: string) => {
-      // Keep existing logic for pendingSearchResults, pendingSearchQuery, searchPending, needsReloadNotes
       if (area !== "local") return;
-      // (Collapsed for brevity - keep original logic here)
       if (changes.pendingSearchResults) setSearchResults(changes.pendingSearchResults.newValue);
-      // ... etc
+      if (changes.pendingSearchQuery) setSearchQuery(changes.pendingSearchQuery.newValue || "");
+      if (changes.needsReloadNotes?.newValue === true) {
+        loadNotes(true);
+        browser.storage.local.set({ needsReloadNotes: false });
+      }
     };
 
     browser.runtime.onMessage.addListener(handleMessage);
@@ -144,8 +149,6 @@ function App() {
     storageApi?.onChanged?.addListener?.(onChanged);
 
     initializeData();
-
-    // ... (Keep existing recheckPendingSearch and getLastSearchResults logic) ...
 
     return () => {
       browser.runtime.onMessage.removeListener(handleMessage);
@@ -157,7 +160,6 @@ function App() {
   }, []);
 
   const initializeData = async () => {
-    // Keep existing implementation
     setNotesLoading(true);
     try {
       const storage = await browser.storage.local.get(["cachedNotes", "cachedTagsMap"]);
@@ -179,29 +181,30 @@ function App() {
   };
 
   const loadNotes = async (force = false) => {
-    // Keep existing implementation
     if (notes.length === 0) setNotesLoading(true);
     try {
       const resNotes = await notesApi.getMyNotes();
       setNotes(resNotes.data || []);
-      // ... fetch tags ...
+      const resTags = await tagsApi.getMyTags();
+      const map: Record<string, string> = {};
+      (resTags?.data?.tags || []).forEach((t: Tag) => { map[t.id] = t.name; });
+      setTagsMap(map);
+      await browser.storage.local.set({ cachedNotes: resNotes.data, cachedTagsMap: map });
     } catch (e) { } finally { setNotesLoading(false); }
   };
 
   const redirectToFAP = () => browser.runtime.sendMessage({ action: "redirectToFAP" });
 
   const cancelScraping = async () => {
-    // Keep existing implementation
     try {
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
       if (tab.id) await browser.tabs.sendMessage(tab.id, { action: "cancelScraping" });
-      setLoading({ transcript: false, schedule: false });
+      setLoading({ transcript: false, schedule: false, copyHtml: false });
       setShowScanningOverlay(false);
     } catch (e) { }
   };
 
   const scrapeData = async (type: "transcript" | "schedule") => {
-    // Keep existing implementation
     setLoading(prev => ({ ...prev, [type]: true }));
     setShowScanningOverlay(true);
     try {
@@ -213,12 +216,36 @@ function App() {
           else setScheduleData(response.data);
           setLoading(prev => ({ ...prev, [type]: false }));
           setShowScanningOverlay(false);
+        } else {
+          throw new Error(response.error);
         }
       }
-    } catch (e) {
+    } catch (e: any) {
       setLoading(prev => ({ ...prev, [type]: false }));
       setShowScanningOverlay(false);
-      setError("Failed to scrape");
+      setError(e.message || "Failed to scrape");
+    }
+  };
+
+  const copyPageHtml = async () => {
+    setLoading(prev => ({ ...prev, copyHtml: true }));
+    setError(null);
+    try {
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      if (!tab.id) throw new Error("No active tab");
+
+      const response = await browser.tabs.sendMessage(tab.id, { action: "copyPageHtml" });
+
+      if (response.success) {
+        setLoadingMessage(prev => ({ ...prev, transcript: "HTML copied!" }));
+        setTimeout(() => setLoadingMessage(prev => ({ ...prev, transcript: "" })), 2000);
+      } else {
+        throw new Error(response.error);
+      }
+    } catch (e: any) {
+      setError(e.message || "Failed to copy HTML");
+    } finally {
+      setLoading(prev => ({ ...prev, copyHtml: false }));
     }
   };
 
@@ -280,7 +307,7 @@ function App() {
     );
   };
 
-  // Also keep downloadAsImage and copyAsHtml functions (omitted for brevity, keep logic same)
+  // Download as image function omitted for brevity, assumed unchanged
 
   // --- RENDER ---
 
@@ -338,9 +365,8 @@ function App() {
       <div className="p-4 space-y-3">
         {error && <div className="text-destructive text-sm bg-destructive/10 p-2 rounded">{error}</div>}
 
-        {/* Transcript & Schedule Cards */}
+        {/* Transcript Card */}
         <Card className="rpg-paper-card">
-          {/* Transcript UI Logic */}
           <CardHeader className="pb-3">
             <div className="flex justify-between">
               <CardTitle>Transcript</CardTitle>
@@ -348,17 +374,35 @@ function App() {
             </div>
           </CardHeader>
           <CardContent className="space-y-2">
+            {/* Status Message */}
+            {loadingMessage.transcript && (
+              <div className="text-xs text-center text-muted-foreground flex items-center justify-center gap-2">
+                <Loader2 className="h-3 w-3 animate-spin" /> {loadingMessage.transcript}
+              </div>
+            )}
+
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={() => navigateTo('transcript')} className="flex-1">Go to Page</Button>
               <Button size="sm" onClick={() => scrapeData('transcript')} disabled={loading.transcript} className="flex-1 rpg-glow-gold">
                 {loading.transcript ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />} Scrape
               </Button>
             </div>
+
+            {/* Copy HTML Button - Always available but useful on transcript page */}
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={copyPageHtml}
+              disabled={loading.copyHtml}
+              className="w-full"
+            >
+              {loading.copyHtml ? <Loader2 className="h-3 w-3 animate-spin" /> : <Copy className="h-3 w-3 mr-2" />}
+              Copy Page HTML
+            </Button>
           </CardContent>
         </Card>
 
         <Card className="rpg-paper-card">
-          {/* Schedule UI Logic */}
           <CardHeader className="pb-3">
             <div className="flex justify-between">
               <CardTitle>Schedule</CardTitle>
@@ -377,7 +421,6 @@ function App() {
 
         {renderSearchResults()}
 
-        {/* Dashboard Link */}
         <Card className="rpg-paper-card bg-accent/5 border-accent/50">
           <CardContent className="pt-4">
             <Button onClick={openDashboard} className="w-full rpg-glow-gold" size="sm">Open Full Dashboard</Button>
