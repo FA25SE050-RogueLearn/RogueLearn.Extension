@@ -29,7 +29,7 @@ import {
   Info,
   Download,
   AlertTriangle,
-  Copy, // Make sure Copy is imported
+  Copy,
 } from "lucide-react";
 import type { TranscriptData, ScheduleData } from "@/lib/types";
 import notesApi from "@/api/notesApi";
@@ -47,7 +47,7 @@ function App() {
   const [loading, setLoading] = useState<{
     transcript: boolean;
     schedule: boolean;
-    copyHtml: boolean; // Added loading state for copy
+    copyHtml: boolean;
   }>({
     transcript: false,
     schedule: false,
@@ -62,7 +62,6 @@ function App() {
     schedule: "",
   });
   const [error, setError] = useState<string | null>(null);
-  // ... other states ...
   const [transcriptData, setTranscriptData] = useState<TranscriptData | null>(null);
   const [scheduleData, setScheduleData] = useState<ScheduleData | null>(null);
   const [showScanningOverlay, setShowScanningOverlay] = useState(false);
@@ -79,12 +78,8 @@ function App() {
   const hasPendingSearchRef = useRef<boolean>(false);
   const initialLoadTimeoutRef = useRef<number | null>(null);
 
-  // ... useEffect logic same as before ...
   useEffect(() => {
-    // Only check FAP login
     checkLoginStatus();
-
-    // Removed FLM checks
 
     const handleMessage = (message: any) => {
       if (message.action === "scrapingComplete") {
@@ -236,16 +231,197 @@ function App() {
 
       const response = await browser.tabs.sendMessage(tab.id, { action: "copyPageHtml" });
 
-      if (response.success) {
-        setLoadingMessage(prev => ({ ...prev, transcript: "HTML copied!" }));
+      if (response.success && response.html) {
+        await navigator.clipboard.writeText(response.html);
+
+        setLoadingMessage(prev => ({ ...prev, transcript: "Cleaned HTML copied!" }));
         setTimeout(() => setLoadingMessage(prev => ({ ...prev, transcript: "" })), 2000);
       } else {
-        throw new Error(response.error);
+        throw new Error(response.error || "Failed to retrieve HTML");
       }
     } catch (e: any) {
+      console.error("Copy failed:", e);
       setError(e.message || "Failed to copy HTML");
     } finally {
       setLoading(prev => ({ ...prev, copyHtml: false }));
+    }
+  };
+
+  const downloadAsImage = async (type: "transcript" | "schedule") => {
+    const data = type === "transcript" ? transcriptData : scheduleData;
+    if (!data) {
+      console.error("No data to download");
+      return;
+    }
+
+    try {
+      // Create a canvas to render data as image
+      const canvas = document.createElement("canvas");
+      canvas.width = 800;
+      canvas.height =
+        type === "transcript"
+          ? Math.max(600, (transcriptData?.subjects.length || 0) * 35 + 200)
+          : Math.max(600, (scheduleData?.sessions.length || 0) * 30 + 200);
+
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) {
+        console.error("Could not get canvas context");
+        return;
+      }
+
+      // Background
+      ctx.fillStyle = "#1A0D08"; // Deep brown
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Header
+      ctx.fillStyle = "#D4AF37"; // Gold
+      ctx.font = "bold 28px Arial, sans-serif";
+      ctx.fillText(
+        "RogueLearn - " + (type === "transcript" ? "Transcript" : "Schedule"),
+        40,
+        50
+      );
+
+      ctx.fillStyle = "#FAFAFA"; // White
+      ctx.font = "14px Arial, sans-serif";
+
+      if (type === "transcript" && transcriptData) {
+        ctx.fillText(
+          `Student: ${transcriptData.studentName} (${transcriptData.studentId})`,
+          40,
+          90
+        );
+        ctx.fillText(
+          `Total Courses: ${transcriptData.subjects.length}`,
+          40,
+          115
+        );
+
+        // Draw table header
+        let yPos = 160;
+        ctx.fillStyle = "#D4AF37";
+        ctx.font = "bold 14px Arial, sans-serif";
+        ctx.fillText("Code", 40, yPos);
+        ctx.fillText("Course Name", 140, yPos);
+        ctx.fillText("Grade", 480, yPos);
+        ctx.fillText("Semester", 560, yPos);
+        ctx.fillText("Status", 660, yPos); // Added status column
+
+        // Draw courses
+        ctx.font = "13px Arial, sans-serif";
+        transcriptData.subjects.forEach((subject, index) => {
+          yPos += 35;
+          ctx.fillStyle = index % 2 === 0 ? "#FAFAFA" : "#D0D0D0";
+          ctx.fillText(subject.subjectCode, 40, yPos);
+          const courseName =
+            subject.subjectName.length > 35
+              ? subject.subjectName.substring(0, 32) + "..."
+              : subject.subjectName;
+          ctx.fillText(courseName, 140, yPos);
+
+          // Grade with color
+          ctx.fillStyle = subject.status === "Passed" ? "#22c55e" : "#dc2626";
+          ctx.font = "bold 14px Arial, sans-serif";
+          ctx.fillText(subject.grade, 480, yPos);
+
+          ctx.fillStyle = index % 2 === 0 ? "#FAFAFA" : "#D0D0D0";
+          ctx.font = "13px Arial, sans-serif";
+          ctx.fillText(subject.semester, 560, yPos);
+
+          // Status with color
+          if (subject.status === 'Passed') ctx.fillStyle = '#22c55e';
+          else if (subject.status === 'Studying') ctx.fillStyle = '#3b82f6';
+          else ctx.fillStyle = '#dc2626';
+
+          ctx.font = "bold 13px Arial, sans-serif";
+          ctx.fillText(subject.status || '-', 660, yPos);
+        });
+      } else if (type === "schedule" && scheduleData) {
+        ctx.fillText(`Week Range: ${scheduleData.weekRange}`, 40, 90);
+        ctx.fillText(
+          `Total Sessions: ${scheduleData.sessions.length}`,
+          40,
+          115
+        );
+
+        // Draw sessions
+        let yPos = 160;
+        ctx.fillStyle = "#D4AF37";
+        ctx.font = "bold 14px Arial, sans-serif";
+        ctx.fillText("Date", 40, yPos);
+        ctx.fillText("Subject", 140, yPos);
+        ctx.fillText("Slot", 420, yPos);
+        ctx.fillText("Room", 500, yPos);
+        ctx.fillText("Status", 620, yPos);
+
+        ctx.font = "13px Arial, sans-serif";
+        scheduleData.sessions.forEach((session, index) => {
+          yPos += 30;
+          ctx.fillStyle = index % 2 === 0 ? "#FAFAFA" : "#D0D0D0";
+          ctx.fillText(session.date, 40, yPos);
+          ctx.fillText(session.subjectCode, 140, yPos);
+          ctx.fillText(`Slot ${session.slotNumber}`, 420, yPos);
+          ctx.fillText(session.room.substring(0, 15), 500, yPos);
+
+          const statusText = session.status || "upcoming";
+          ctx.fillStyle =
+            statusText === "attended"
+              ? "#22c55e"
+              : statusText === "absent"
+                ? "#dc2626"
+                : "#D0D0D0";
+          ctx.font = "bold 12px Arial, sans-serif";
+          ctx.fillText(statusText, 620, yPos);
+          ctx.font = "13px Arial, sans-serif";
+        });
+      }
+
+      // Footer
+      const yPos = canvas.height - 30;
+      ctx.fillStyle = "#A0A0A0";
+      ctx.font = "12px Arial, sans-serif";
+      ctx.fillText(
+        `Generated by RogueLearn Helper - ${new Date().toLocaleString()}`,
+        40,
+        yPos
+      );
+
+      console.log("Canvas created, converting to blob...");
+
+      // Convert to blob and download
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            console.error("Failed to create blob from canvas");
+            return;
+          }
+
+          console.log("Blob created, size:", blob.size);
+
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `roguelearn-${type}-${Date.now()}.png`;
+
+          console.log("Triggering download:", a.download);
+
+          // Append to body to ensure it works in Firefox
+          document.body.appendChild(a);
+          a.click();
+
+          // Clean up
+          setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            console.log("Download complete, cleaned up");
+          }, 100);
+        },
+        "image/png",
+        1.0
+      );
+    } catch (error) {
+      console.error("Error creating image:", error);
+      setError("Failed to create image. Please try again.");
     }
   };
 
@@ -306,10 +482,6 @@ function App() {
       </Card>
     );
   };
-
-  // Download as image function omitted for brevity, assumed unchanged
-
-  // --- RENDER ---
 
   if (isLoggedIn === null) {
     return (
@@ -388,17 +560,30 @@ function App() {
               </Button>
             </div>
 
-            {/* Copy HTML Button - Always available but useful on transcript page */}
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={copyPageHtml}
-              disabled={loading.copyHtml}
-              className="w-full"
-            >
-              {loading.copyHtml ? <Loader2 className="h-3 w-3 animate-spin" /> : <Copy className="h-3 w-3 mr-2" />}
-              Copy Page HTML
-            </Button>
+            {/* Download and Copy Buttons - Only show if data is scraped */}
+            {transcriptData && !loading.transcript && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => downloadAsImage("transcript")}
+                  className="w-full"
+                >
+                  <Download className="h-3 w-3 mr-1" />
+                  Download as Image
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={copyPageHtml}
+                  disabled={loading.copyHtml}
+                  className="w-full"
+                >
+                  {loading.copyHtml ? <Loader2 className="h-3 w-3 animate-spin" /> : <Copy className="h-3 w-3 mr-2" />}
+                  Copy Cleaned HTML
+                </Button>
+              </>
+            )}
           </CardContent>
         </Card>
 
@@ -416,6 +601,17 @@ function App() {
                 {loading.schedule ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />} Scrape
               </Button>
             </div>
+            {scheduleData && !loading.schedule && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => downloadAsImage("schedule")}
+                className="w-full"
+              >
+                <Download className="h-3 w-3 mr-1" />
+                Download as Image
+              </Button>
+            )}
           </CardContent>
         </Card>
 
