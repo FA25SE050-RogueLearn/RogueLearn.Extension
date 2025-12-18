@@ -1,51 +1,41 @@
-// RogueLearn.Extension/entrypoints/content.ts
+// User/entrypoints/content.ts
 import { scrapeTranscript } from '@/lib/transcript-scraper';
 import { scrapeSchedule } from '@/lib/schedule-scraper';
-import { scrapeSyllabusFromPage, getFlmPageStatus, type FlmPageStatus } from '@/lib/flm-scraper';
+// Removed FLM imports
 
 export default defineContentScript({
   matches: [
     '*://fap.fpt.edu.vn/*',
-    '*://flm.fpt.edu.vn/*'
+    // Removed FLM match
   ],
   main() {
-    console.log('FPT FAP/FLM Helper - Content script loaded');
-    console.log('Current URL:', window.location.href);
+    console.log('RogueLearn Student - Content script loaded');
 
     // Auto-continue schedule scraping if in progress
     if (window.location.href.includes('fap.fpt.edu.vn/Report/ScheduleOfWeek.aspx')) {
-      // Check if there's a scraping session in progress
       const progressData = sessionStorage.getItem('scheduleScrapingProgress');
       if (progressData) {
-        console.log('Detected schedule scraping in progress, auto-continuing...');
-        // Wait for page to fully load, then auto-trigger scraping
         setTimeout(() => {
           scrapeSchedule().then(result => {
             if (!result.success && (result.error?.includes('Scraping in progress') || result.error?.includes('Transitioning'))) {
-              console.log('Progress update:', result.error);
-              // Send progress update to popup
               browser.runtime.sendMessage({
                 action: 'scrapingProgress',
                 type: 'schedule',
                 message: result.error
               });
             } else if (result.success) {
-              console.log('Scraping complete!', result.data);
-              // Notify popup that scraping is complete
               browser.runtime.sendMessage({
                 action: 'scrapingComplete',
                 data: result.data
               });
             } else {
-              // Error occurred
-              console.error('Scraping error:', result.error);
               browser.runtime.sendMessage({
                 action: 'scrapingError',
                 error: result.error
               });
             }
           });
-        }, 1500); // Wait 1.5s for page to fully load
+        }, 1500); 
       }
     }
 
@@ -53,7 +43,6 @@ export default defineContentScript({
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message.action === 'checkLoginStatus') {
         const isLoggedIn = checkIfLoggedIn();
-        console.log('Login status check:', isLoggedIn);
         sendResponse({ isLoggedIn });
         return true;
       }
@@ -62,7 +51,7 @@ export default defineContentScript({
         scrapeTranscript().then(result => {
           sendResponse(result);
         });
-        return true; // Keep message channel open for async response
+        return true; 
       }
 
       if (message.action === 'scrapeSchedule') {
@@ -73,83 +62,38 @@ export default defineContentScript({
       }
 
       if (message.action === 'cancelScraping') {
-        // Cancel the scraping operation
         const cancelledKey = 'scheduleScrapingCancelled';
         sessionStorage.setItem(cancelledKey, 'true');
         sessionStorage.removeItem('scheduleScrapingProgress');
-        console.log('Scraping cancelled by user');
         sendResponse({ success: true, cancelled: true });
         return true;
       }
-
-      // NEW: Handle FLM Page Status Check (for UI to know if import button should be enabled)
-      if (message.action === 'checkFlmPageStatus') {
-        console.log('[Content] Checking FLM page status...');
-        const status = getFlmPageStatus();
-        console.log('[Content] FLM page status:', status);
-        sendResponse(status);
-        return true;
-      }
-
-      // NEW: Handle FLM Syllabus Scrape
-      if (message.action === 'scrapeSyllabus') {
-        console.log('[Content] Scraping syllabus...');
-        const result = scrapeSyllabusFromPage();
-        console.log('[Content] Syllabus result:', result);
-        sendResponse(result);
-        return true;
-      }
-
+      
+      // Removed FLM actions
       return false;
     });
   },
 });
 
 function checkIfLoggedIn(): boolean {
-  // Check if user is logged in by looking for common elements on FAP site
-  console.log('Checking login status...');
-  
-  // Primary method: Check if current URL is a logged-in page
   const currentUrl = window.location.href;
-  console.log('Current URL:', currentUrl);
   
-  // FLM Check
-  if (currentUrl.includes('flm.fpt.edu.vn')) {
-      // Simple heuristic for FLM - usually requires auth to see content
-      // A more robust check might look for a logout button or user profile element
-      const logoutLink = document.querySelector('a[href*="LogOut"], a[href*="logout"]');
-      if (logoutLink) return true;
-      
-      // Fallback: if we are on a detail page, likely logged in
-      if (document.querySelector('#divContent')) return true;
-  }
-
-  // FAP Check
-  // These URLs only exist when logged in
   if (currentUrl.includes('fap.fpt.edu.vn/Student.aspx') || 
       currentUrl.includes('fap.fpt.edu.vn/Thongbao.aspx') ||
       currentUrl.includes('/Grade/') || 
       currentUrl.includes('/Report/')) {
-    console.log('URL indicates logged in page');
     return true;
   }
   
-  // Check if we're NOT on the login page (login page has specific form)
   const loginForm = document.querySelector('form[action*="login"], input[name="ctl00$mainContent$tbUserName"]');
   if (!loginForm && currentUrl.includes('fap.fpt.edu.vn')) {
-    console.log('No login form found on FAP domain - assuming logged in');
     return true;
-  } else if (loginForm) {
-    console.log('Login form found - not logged in');
   }
   
-  // Check for any links to Student/Grade/Report pages (only visible when logged in)
   const loggedInLink = document.querySelector('a[href*="Student.aspx"], a[href*="Thongbao.aspx"], a[href*="Grade"], a[href*="Report"]');
   if (loggedInLink) {
-    console.log('Found logged-in navigation link');
     return true;
   }
   
-  console.log('Not logged in');
   return false;
 }

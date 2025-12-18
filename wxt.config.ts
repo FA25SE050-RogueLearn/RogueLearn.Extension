@@ -12,10 +12,12 @@ export default defineConfig({
       "https://roguelearn.site/*",
       "http://localhost/*",
       "http://localhost:*/**",
-       "https://fap.fpt.edu.vn/*",
-      "https://flm.fpt.edu.vn/*",
+      "https://fap.fpt.edu.vn/*",
+      "https://rogue-learn-frontend.vercel.app/*"
+
     ],
-    name: 'RogueLearn',
+    name: 'RogueLearn: Student Helper', // Renamed
+    description: 'Scrape grades, manage notes, and generate your Quest Line.',
     action: {}, 
   },
   vite: () => ({
