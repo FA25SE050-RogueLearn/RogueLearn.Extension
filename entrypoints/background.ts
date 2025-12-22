@@ -26,6 +26,7 @@ export default defineBackground(() => {
   // Context Menus for selection
   const PARENT_ID = 'roguelearn_context_parent'
   const CREATE_NOTE_ID = 'roguelearn_create_note'
+  const CREATE_NOTE_RAW_ID = 'roguelearn_create_note_raw'
   const SEARCH_NOTES_ID = 'roguelearn_search_notes'
   const RESULTS_PARENT_ID = 'roguelearn_last_results'
   const OPEN_NOTE_PREFIX = 'roguelearn_open_note_'
@@ -86,6 +87,13 @@ export default defineBackground(() => {
           contexts: ['selection'],
         })
         console.log('[background] menu created', { id: CREATE_NOTE_ID })
+        browser.contextMenus.create({
+          id: CREATE_NOTE_RAW_ID,
+          parentId: PARENT_ID,
+          title: 'Create Note (Raw Text)',
+          contexts: ['selection'],
+        })
+        console.log('[background] menu created', { id: CREATE_NOTE_RAW_ID })
         browser.contextMenus.create({
           id: SEARCH_NOTES_ID,
           parentId: PARENT_ID,
@@ -217,6 +225,38 @@ export default defineBackground(() => {
     }
 
     if (!text) return
+
+    if (info.menuItemId === CREATE_NOTE_RAW_ID) {
+      try {
+        browser.action.setBadgeText({ text: '🔃' })
+        const user = await getCurrentSupabaseUser()
+        if (!user) throw new Error('Not logged in')
+        
+        const title = text.length > 80 ? text.slice(0, 77) + '…' : text
+        const res = await notesApi.create({
+          authUserId: user.id,
+          title,
+          content: text,
+          isPublic: false,
+          tagIds: [],
+          skillIds: [],
+          questIds: []
+        })
+        
+        browser.runtime.sendMessage({ action: 'noteCreated', noteId: res.data.id, title })
+        try {
+          const storage: any = (browser as any).storage ?? (globalThis as any).chrome?.storage
+          await storage?.local?.set?.({ needsReloadNotes: true })
+        } catch {}
+        browser.action.setBadgeText({ text: '✅' })
+        setTimeout(() => browser.action.setBadgeText({ text: '' }), 3000)
+      } catch (e) {
+        browser.action.setBadgeText({ text: '⚠️' })
+        browser.runtime.sendMessage({ action: 'noteCreateError', error: e instanceof Error ? e.message : String(e) })
+        setTimeout(() => browser.action.setBadgeText({ text: '' }), 3000)
+      }
+      return
+    }
 
     if (info.menuItemId === CREATE_NOTE_ID) {
       try {
