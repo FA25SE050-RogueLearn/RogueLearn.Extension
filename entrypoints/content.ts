@@ -105,20 +105,49 @@ function checkIfLoggedIn(): boolean {
 
 // --- HTML CLEANING & GENERATION UTILITY ---
 function generateCleanTranscriptHtml(): string {
-  // 1. Target the specific grade table container
-  const gradeDiv = document.getElementById('ctl00_mainContent_divGrade');
-  if (!gradeDiv) {
-    throw new Error("Could not find grade table on this page");
+  // 1. Extract User Info Header (Logged in user, logout link, campus)
+  const userDiv = document.getElementById('ctl00_divUser');
+  let userHeaderHtml = '';
+  if (userDiv) {
+    // Reconstruct simply: <p><a href="?view=user">Name</a> | <a href="?logout=true">logout</a> | CAMPUS</p>
+    const links = userDiv.querySelectorAll('a');
+    const span = userDiv.querySelector('span[id$="lblCampusName"]');
+    
+    // Manually build to match expected output cleanly
+    const username = links[0]?.textContent?.trim() || 'User';
+    const campus = span?.textContent?.trim() || '';
+    
+    userHeaderHtml = `<p><a href="?view=user">${username}</a> | <a href="?logout=true">logout</a> | ${campus}</p>`;
   }
 
-  // 2. Clone to avoid modifying live page
-  const tableClone = gradeDiv.cloneNode(true) as HTMLElement;
+  // 2. Extract Navigation (Home | Grade Transcript)
+  const navSpan = document.getElementById('ctl00_lblNavigation');
+  let navHtml = '';
+  if (navSpan) {
+    // Clean up navigation
+    const homeLink = navSpan.querySelector('a');
+    const boldText = navSpan.querySelector('b')?.textContent || 'Grade Transcript';
+    navHtml = `<ol><li><a href="../Student.aspx">Home</a> | <strong>${boldText}</strong></li></ol>`;
+  }
 
-  // 3. Clean up the table structure
-  // Remove attributes from all elements
+  // 3. Extract Main Content (Title, Table, Footer)
+  const gradeDiv = document.getElementById('ctl00_mainContent_divGrade');
+  if (!gradeDiv) throw new Error("Could not find grade table on this page");
+
+  // Get the parent of gradeDiv to capture the H2 title and student info
+  // The structure is usually H2 -> div#Grid -> table -> tr -> td -> div#ctl00_mainContent_divGrade
+  // We want to capture the header "Grade report for transcript..."
+  const mainContent = document.querySelector('#ctl00_mainContent_lblRollNumber')?.closest('h2');
+  const titleHtml = mainContent ? `<h2>${mainContent.textContent?.trim()}</h2>` : '<h2>Grade Transcript</h2>';
+
+  // 4. Clean the Grade Table
+  const tableClone = gradeDiv.querySelector('table')?.cloneNode(true) as HTMLElement;
+  if (!tableClone) throw new Error("Table not found inside grade div");
+
+  // Remove attributes from table and children
   const allElements = tableClone.querySelectorAll('*');
   allElements.forEach(el => {
-    // Remove all attributes except 'colspan', 'rowspan' for table structure
+    // Keep only colspan/rowspan
     const attrs = Array.from(el.attributes);
     for (const attr of attrs) {
       if (!['colspan', 'rowspan'].includes(attr.name.toLowerCase())) {
@@ -126,44 +155,91 @@ function generateCleanTranscriptHtml(): string {
       }
     }
   });
-
-  // 4. Extract Student Info
-  const studentInfoEl = document.getElementById('ctl00_mainContent_lblRollNumber');
-  const studentInfo = studentInfoEl ? studentInfoEl.textContent?.trim() : 'Unknown';
   
-  // 5. Build clean HTML structure
-  const style = `
-    <style>
-      body { font-family: Arial, Helvetica, sans-serif; background: #fff; color: #111; padding: 20px; }
-      h2 { margin: 0 0 10px; }
-      p { margin: 0 0 16px; }
-      table { border-collapse: collapse; width: 100%; }
-      th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-      thead th { background: #f3f4f6; }
-      tbody tr:nth-child(even) { background: #fafafa; }
-    </style>
-  `;
-
-  // 6. Fix Status Colors (inject inline styles for critical status info)
+  // Clean text content (remove extra spaces)
+  // Also fix the status column cells to match expected text-only output if they contain spans
   const rows = tableClone.querySelectorAll('tr');
   rows.forEach(row => {
     const cells = row.querySelectorAll('td');
     if (cells.length > 0) {
-      const lastCell = cells[cells.length - 2]; // Status is usually 2nd to last column
-      if (lastCell) {
-        const statusText = lastCell.textContent?.trim().toLowerCase();
-        if (statusText === 'passed') {
-          lastCell.setAttribute('style', 'color:#22c55e;font-weight:bold');
-        } else if (statusText === 'studying') {
-          lastCell.setAttribute('style', 'color:#3b82f6;font-weight:bold');
-        } else if (statusText === 'not passed') {
-          lastCell.setAttribute('style', 'color:#dc2626;font-weight:bold');
-        }
-      }
+      // Clean content of cells
+      cells.forEach(cell => {
+          // If cell has a span with status, just keep text
+          if (cell.textContent) cell.textContent = cell.textContent.trim();
+      });
     }
   });
 
-  const fullHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Transcript</title>${style}</head><body><h2>Transcript</h2><p>Student: ${studentInfo}</p>${tableClone.innerHTML}</body></html>`;
+  // 5. Extract Footer / Support Info
+  // Usually in a table with id 'cssTable' at bottom
+  const supportDiv = document.getElementById('ctl00_divSupporthcm');
+  const footerP = document.querySelector('p[style*="text-align: center"]');
+  
+  let footerHtml = '';
+  if (supportDiv || footerP) {
+      footerHtml = `
+      <table>
+        <tbody>
+          <tr><td>${supportDiv ? supportDiv.innerHTML.replace(/<br\s*\/?>/gi, '').trim() : ''}</td></tr>
+          <tr><td>${footerP ? footerP.innerHTML.trim() : ''}</td></tr>
+        </tbody>
+      </table>`;
+      
+      // Basic cleanup of footer html
+      // Remove class/style from footer
+      footerHtml = footerHtml.replace(/ class="[^"]*"/g, '').replace(/ style="[^"]*"/g, '');
+  }
+  
+  // 6. Support Links (App Store)
+  // Usually in a table at the top right of original page
+  const appStoreTable = document.querySelector('.col-md-6 .col-md-12 table');
+  let appStoreHtml = '';
+  if (appStoreTable) {
+      const clone = appStoreTable.cloneNode(true) as HTMLElement;
+      clone.querySelectorAll('*').forEach(el => {
+          Array.from(el.attributes).forEach(attr => {
+             if (!['src', 'href', 'alt', 'colspan'].includes(attr.name)) el.removeAttribute(attr.name);
+          });
+      });
+      appStoreHtml = clone.outerHTML;
+  }
 
-  return fullHtml;
+  // 7. Construct Final HTML
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <title>FPT University Academic Portal</title>
+</head>
+<body>
+  <h1>FPT University Academic Portal</h1>
+  ${appStoreHtml}
+  ${userHeaderHtml}
+  ${navHtml}
+  <table>
+    <tbody>
+      <tr>
+        <td>
+          ${titleHtml}
+          <table>
+            <tbody>
+              <tr>
+                <td>
+                  ${tableClone.outerHTML}
+                  <!-- Placeholder for extra info like Capstone topic if present -->
+                </td>
+              </tr>
+              <tr>
+                <td>
+                   ${footerHtml}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</body>
+</html>`;
 }
